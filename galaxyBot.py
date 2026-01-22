@@ -3,8 +3,8 @@ from discord.ext import commands
 from discord.ui import Button, View, Modal, TextInput
 import json
 import os
-from aiohttp import web
-import asyncio
+from flask import Flask
+from threading import Thread
 
 # Configurações
 ADMIN_ID = 1451570927711158313
@@ -17,6 +17,20 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix=['!', '/'], intents=intents)
+
+# Servidor Flask para manter online 24/7
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "🟢 Bot Discord está ONLINE 24/7!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
 
 # Arquivo para salvar categorias
 CATEGORIES_FILE = 'categories.json'
@@ -224,10 +238,13 @@ def is_admin():
 # Eventos do bot
 @bot.event
 async def on_ready():
-    print(f'✅ Bot online como {bot.user}')
-    print(f'📊 ID: {bot.user.id}')
+    print('='*50)
+    print(f'✅ Bot online como: {bot.user}')
+    print(f'📊 ID do Bot: {bot.user.id}')
     print(f'🌐 Servidores autorizados: {ALLOWED_SERVERS}')
     print(f'👑 Admin ID: {ADMIN_ID}')
+    print(f'📁 Categorias carregadas: {len(categories)}')
+    print('='*50)
     await bot.change_presence(activity=discord.Game(name="Scripts 24/7 | !scripts"))
 
 @bot.event
@@ -242,7 +259,6 @@ async def on_guild_join(guild):
 @is_admin()
 async def categoria_add(ctx):
     modal = AddCategoryModal()
-    await ctx.send("Abrindo modal... (Verifique suas DMs ou interações)", delete_after=5)
     
     # Envia mensagem com botão para abrir modal
     view = View(timeout=60)
@@ -250,11 +266,18 @@ async def categoria_add(ctx):
     async def open_modal(interaction: discord.Interaction):
         await interaction.response.send_modal(modal)
     
-    button = Button(label='➕ Adicionar Categoria', style=discord.ButtonStyle.primary)
+    button = Button(label='➕ Adicionar Categoria', style=discord.ButtonStyle.primary, emoji='📝')
     button.callback = open_modal
     view.add_item(button)
     
-    await ctx.send("**Clique no botão abaixo para adicionar uma nova categoria:**", view=view)
+    embed = discord.Embed(
+        title="➕ Adicionar Nova Categoria",
+        description="Clique no botão abaixo para abrir o formulário e adicionar uma nova categoria de scripts!",
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text=f"Solicitado por {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+    
+    await ctx.send(embed=embed, view=view)
 
 # Comando: scripts (qualquer pessoa)
 @bot.command(name='scripts', aliases=['script'])
@@ -263,7 +286,7 @@ async def scripts(ctx):
     if not categories:
         embed = discord.Embed(
             title="📜 Lista de Scripts",
-            description="❌ Nenhuma categoria de scripts foi adicionada ainda!",
+            description="❌ Nenhuma categoria de scripts foi adicionada ainda!\n\nO Admin Branzz precisa usar `!categoria_add` primeiro.",
             color=discord.Color.red()
         )
         await ctx.send(embed=embed)
@@ -275,37 +298,45 @@ async def scripts(ctx):
     
     await ctx.send(embed=embed, view=view)
 
-# Servidor web para manter o bot online no Render
-async def web_server():
-    app = web.Application()
+# Comando de ajuda
+@bot.command(name='ajuda', aliases=['help', 'comandos'])
+@check_server()
+async def ajuda(ctx):
+    embed = discord.Embed(
+        title="📋 Comandos do Bot",
+        description="Aqui estão os comandos disponíveis:",
+        color=discord.Color.blue()
+    )
     
-    async def health(request):
-        return web.Response(text='Bot está online! 🟢')
+    embed.add_field(
+        name="👥 Para Todos",
+        value="`!scripts` ou `/scripts` - Ver todas as categorias de scripts",
+        inline=False
+    )
     
-    app.router.add_get('/', health)
-    app.router.add_get('/health', health)
+    if ctx.author.id == ADMIN_ID:
+        embed.add_field(
+            name="👑 Admin Branzz",
+            value="`!categoria_add` - Adicionar nova categoria de scripts",
+            inline=False
+        )
     
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.getenv('PORT', 8080)))
-    await site.start()
-    print('🌐 Servidor web iniciado na porta', os.getenv('PORT', 8080))
+    embed.set_footer(text="Bot funcionando 24/7!")
+    await ctx.send(embed=embed)
 
 # Iniciar o bot
-async def main():
-    async with bot:
-        # Inicia o servidor web
-        bot.loop.create_task(web_server())
-        
-        # Pega o token
-        TOKEN = os.getenv('DISCORD_TOKEN')
-        
-        if TOKEN is None:
-            print("❌ ERRO: Token do Discord não encontrado!")
-            print("Configure a variável de ambiente DISCORD_TOKEN")
-            return
-        
-        await bot.start(TOKEN)
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    keep_alive()
+    
+    # Pega o token das variáveis de ambiente
+    TOKEN = os.getenv('DISCORD_TOKEN')
+    
+    if TOKEN is None:
+        print("❌ ERRO: Token do Discord não encontrado!")
+        print("⚠️ Configure a variável DISCORD_TOKEN nos Secrets do Replit")
+        print("📝 Vá em: Secrets (ícone de cadeado) → New Secret")
+        print("    Key: DISCORD_TOKEN")
+        print("    Value: seu_token_aqui")
+    else:
+        print("🔑 Token encontrado! Iniciando bot...")
+        bot.run(TOKEN)
